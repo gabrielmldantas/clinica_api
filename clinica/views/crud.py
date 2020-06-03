@@ -1,6 +1,6 @@
 import datetime
 from clinica import app, db
-from clinica.models import Especialidade, Medico, Cobertura, Paciente, Endereco, Usuario, Consulta
+from clinica.models import Especialidade, Medico, Cobertura, Paciente, Endereco, Usuario, Consulta, FormaPagamento, Pagamento, RequisicaoExames, ReceitaMedica
 from flask import request, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -199,6 +199,77 @@ def _validar_consulta(consulta):
         return 'O paciente já possui uma consulta marcada para a data solicitada.', 400
 
     return None
+
+# Forma de Pagamento
+@app.route('/formapagamento', defaults={'id_forma_pagamento': None}, methods=['GET', 'POST'])
+@app.route('/formapagamento/<int:id_forma_pagamento>', methods=['PUT', 'DELETE'])
+def forma_pagamento(id_forma_pagamento):
+    if request.method == 'GET':
+        formas_pagamento = db.session.query(FormaPagamento).order_by(FormaPagamento.descricao).all()
+        response = _to_result_list([forma_pagamento.to_dict() for forma_pagamento in formas_pagamento])
+        return response
+    elif request.method == 'POST':
+        forma_pagamento = FormaPagamento()
+        forma_pagamento.descricao = request.json['descricao']
+        forma_pagamento.vista = request.json['vista'] == 'true'
+        db.session.add(forma_pagamento)
+        db.session.commit()
+        return make_response(forma_pagamento.to_dict())
+    elif request.method == 'PUT':
+        forma_pagamento = db.session.query(FormaPagamento).get(id_forma_pagamento)
+        forma_pagamento.descricao = request.json['descricao']
+        forma_pagamento.vista = request.json['vista'] == 'true'
+        db.session.commit()
+        return make_response(forma_pagamento.to_dict())
+    else:
+        forma_pagamento = db.session.query(FormaPagamento).get(id_forma_pagamento)
+        db.session.delete(forma_pagamento)
+        db.session.commit()
+        return ''
+
+@app.route('/consulta/<int:id_consulta>/pagamento', methods=['POST'])
+def registro_pagamentos_consulta(id_consulta):
+    consulta = db.session.query(Consulta).get(id_consulta)
+    forma_pagamento = db.session.query(FormaPagamento).get(request.json['idFormaPagamento'])
+    valor_pagamento = request.json['valor'] / request.json['parcelas']
+    data_pagamento = datetime.datetime.now()
+    delta_proximo_pagamento = datetime.timedelta(days=30)
+    for _ in range(request.json['parcelas']):
+        pagamento = Pagamento()
+        pagamento.consulta = consulta
+        pagamento.forma_pagamento = forma_pagamento
+        pagamento.valor = valor_pagamento
+        pagamento.data_pagamento = data_pagamento
+        db.session.add(pagamento)
+        consulta.pagamentos.append(pagamento)
+
+        data_pagamento += delta_proximo_pagamento
+    db.session.commit()
+    return make_response(consulta.to_dict())
+
+@app.route('/consulta/<int:id_consulta>/exames', methods=['POST'])
+def requisicao_exames(id_consulta):
+    consulta = db.session.query(Consulta).get(id_consulta)
+    requisicao_exames = RequisicaoExames()
+    requisicao_exames.consulta = consulta
+    requisicao_exames.descricao = request.json['descricao']
+    requisicao_exames.data = datetime.datetime.now()
+    db.session.add(requisicao_exames)
+    consulta.requisicoes_exames.append(requisicao_exames)
+    db.session.commit()
+    return make_response(consulta.to_dict())
+
+@app.route('/consulta/<int:id_consulta>/receita', methods=['POST'])
+def receita(id_consulta):
+    consulta = db.session.query(Consulta).get(id_consulta)
+    receita_medica = ReceitaMedica()
+    receita_medica.consulta = consulta
+    receita_medica.descricao = request.json['descricao']
+    receita_medica.data = datetime.datetime.now()
+    db.session.add(receita_medica)
+    consulta.receitas_medicas.append(receita_medica)
+    db.session.commit()
+    return make_response(consulta.to_dict())
 
 def _to_result_list(results):
     return {'results': results}
